@@ -59,7 +59,8 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
+        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
     }
 
@@ -67,7 +68,8 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     s, err := readme.GetContent()
 
     if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
+        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
     }
 
@@ -102,8 +104,8 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        // A directory should always be found, letter or '#'.
-        w.WriteHeader(http.StatusInternalServerError)
+        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
     }
 
@@ -132,15 +134,16 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        // If the filename exists, then the file itself should be available.
-        w.WriteHeader(http.StatusInternalServerError)
+        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
     }
 
     s, err := file.GetContent()
 
     if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
+        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
     }
 
