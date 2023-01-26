@@ -8,6 +8,7 @@ import (
     "context"
     "strings"
     "net/http"
+    "path/filepath"
     "encoding/json"
 
     "golang.org/x/oauth2"
@@ -56,13 +57,11 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     // Get the README contents.
     s, _ := readme.GetContent()
 
-    reExtension := regexp.MustCompile("(\\..+)")
-    reLanguage  := regexp.MustCompile("\\* \\[(.+)\\]\\(.+\\)\n")
+    re  := regexp.MustCompile("\\* \\[(.+)\\]\\(.+\\)\n")
 
     // Find list of languages: "* [Language Name](lang.ext)"
-    for _, m := range reLanguage.FindAllStringSubmatch(s, -1) {
-        // Not all languages have file extensions; search separately.
-        ext := reExtension.FindString(m[0])
+    for _, m := range re.FindAllStringSubmatch(s, -1) {
+        ext := filepath.Ext(m[0])
 
         languages = append(languages, &Language{
             Name: m[1],
@@ -80,7 +79,7 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	router := mux.NewRouter()
+    router := mux.NewRouter()
     ctx = context.Background()
 
     // Load `env` configuration.
