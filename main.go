@@ -6,9 +6,11 @@ import (
     "time"
     "regexp"
     "context"
+    "strings"
     "net/http"
     "encoding/json"
 
+    "golang.org/x/oauth2"
     "github.com/spf13/viper"
     "github.com/gorilla/mux"
     "github.com/google/go-github/v49/github"
@@ -36,7 +38,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 func getLanguages(w http.ResponseWriter, r *http.Request) {
     var languages   []*Language
 
-    client := github.NewClient(nil)
+    client := authorize(r.Header.Get("Authorization"))
 
     // Get the README object.
     readme, _, err := client.Repositories.GetReadme(
@@ -103,4 +105,20 @@ func main() {
         fmt.Sprintf(":%d", viper.GetInt("server.port")),
         router,
     ))
+}
+
+// --- HELPERS ---
+
+func authorize(s string) *github.Client {
+    if s == "" {
+        return github.NewClient(nil)
+    }
+
+    t := strings.Replace(s, "Bearer", "", 1)
+    ts := oauth2.StaticTokenSource(
+        &oauth2.Token{AccessToken: t},
+    )
+    tc := oauth2.NewClient(ctx, ts)
+
+    return github.NewClient(tc)
 }
