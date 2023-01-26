@@ -36,6 +36,19 @@ type LanguagesResponse struct {
     RequestedAt     time.Time   `"json:requested_at"`
 }
 
+// Stolen from: https://github.com/google/go-github/blob/838d2238a6da019b49b571e8d8ebc5a6b12f8844/github/github.go#L863
+type ErrorResponse struct {
+    Request         *http.Request
+    StatusCode      int         `json:"status_code"`
+    Message         string      `json:"message"`
+}
+
+func (r *ErrorResponse) Error() string {
+	return fmt.Sprintf("%v %v: %d %v",
+		r.Request.Method, r.Request.URL,
+		r.StatusCode, r.Message)
+}
+
 var ctx context.Context
 
 func home(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +104,7 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
 
     initial := strings.ToLower(l[0:1])
 
-    if !regexp.MustCompile(`^[a-z]$`).MatchString(initial) {
+    if !regexp.MustCompile("^[a-z]$").MatchString(initial) {
         initial = "#"
     }
 
@@ -109,27 +122,20 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    rc := findLanguage(dir, l)
+    language, err := findLanguage(dir, l)
 
-    if rc == nil {
-        w.WriteHeader(http.StatusNotFound)
+    if err != nil {
+        err.(*ErrorResponse).Request = r
+        w.WriteHeader(err.(*ErrorResponse).StatusCode)
+        json.NewEncoder(w).Encode(err.Error())
         return
-    }
-
-    name := rc.GetName()
-    ext := filepath.Ext(name)
-    n := strings.TrimSuffix(name, ext)
-
-    language := &Language{
-        Name: n,
-        Extension: ext,
     }
 
     file, _, _, err := client.Repositories.GetContents(
         ctx,
         viper.GetString("repository.user"),
         viper.GetString("repository.name"),
-        initial + "/" + name,
+        initial + "/" + language.Name + language.Extension,
         nil,
     )
 
@@ -194,14 +200,25 @@ func authorize(s string) *github.Client {
     return github.NewClient(tc)
 }
 
-func findLanguage(rcs []*github.RepositoryContent, l string) *github.RepositoryContent {
+func findLanguage(rcs []*github.RepositoryContent, l string) (*Language, error) {
     for _, rc := range rcs {
         if isLanguage(rc, l) {
-            return rc
+            name := rc.GetName()
+            ext := filepath.Ext(name)
+            n := strings.TrimSuffix(name, ext)
+
+            return &Language{
+                Name: n,
+                Extension: ext,
+            }, nil
         }
     }
 
-    return nil
+    return nil, &ErrorResponse{
+        Request: nil,
+		StatusCode: http.StatusNotFound,
+		Message: "Not Found",
+	}
 }
 
 func findLanguages(s string) (languages []*Language) {
