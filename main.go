@@ -164,17 +164,9 @@ func main() {
     router := mux.NewRouter()
     ctx = context.Background()
 
-    // Load `env` configuration.
-    viper.SetConfigName("env")
-    viper.AddConfigPath("config")
-    if err := viper.ReadInConfig(); err != nil {
-        if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-            fmt.Printf("Config file not found: %v\n", err)
-        } else {
-            fmt.Printf("Error: %v\n", err)
-        }
-        return
-    }
+    loadConfigs([]string {
+        "env",
+    })
 
     router.HandleFunc("/api", home).Methods(http.MethodGet)
     router.HandleFunc("/api/languages", getLanguages).Methods(http.MethodGet)
@@ -234,4 +226,18 @@ func isLanguage(rc *github.RepositoryContent, l string) bool {
     n := strings.TrimSuffix(name, ext)
 
     return strings.ToLower(l) == strings.ToLower(n)
+}
+
+func loadConfigs(configs []string) (err error) {
+    viper.AddConfigPath("config")
+
+    for _, s := range configs {
+        viper.SetConfigName(s)
+
+        if err = viper.MergeInConfig(); err != nil {
+            return
+        }
+    }
+
+    return
 }
