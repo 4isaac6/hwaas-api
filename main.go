@@ -209,7 +209,7 @@ func findLanguages(s string) (languages []*Language) {
 
     // Find list of languages: "* [Language Name](lang.ext)"
     for _, m := range re.FindAllStringSubmatch(s, -1) {
-        ext := filepath.Ext(m[0])
+        ext := strings.TrimSuffix(filepath.Ext(m[0]), ")\n")
 
         languages = append(languages, &Language{
             Name: m[1],
