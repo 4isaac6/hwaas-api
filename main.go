@@ -2,7 +2,6 @@ package main
 
 import (
     "fmt"
-    "log"
     "time"
     "regexp"
     "context"
@@ -49,7 +48,6 @@ func home(w http.ResponseWriter, r *http.Request) {
 func getLanguages(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
 
-    var languages   []*Language
     client := authorize(r.Header.Get("Authorization"))
 
     // Get the README object.
@@ -61,24 +59,19 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
+        w.WriteHeader(http.StatusInternalServerError)
         return
     }
 
     // Get the README contents.
-    s, _ := readme.GetContent()
+    s, err := readme.GetContent()
 
-    re  := regexp.MustCompile("\\* \\[(.+)\\]\\(.+\\)\n")
-
-    // Find list of languages: "* [Language Name](lang.ext)"
-    for _, m := range re.FindAllStringSubmatch(s, -1) {
-        ext := filepath.Ext(m[0])
-
-        languages = append(languages, &Language{
-            Name: m[1],
-            Extension: ext,
-        })
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
     }
+
+    languages := findLanguages(s)
 
     res := &LanguagesResponse{
         Languages: languages,
@@ -91,13 +84,12 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
 func getLanguage(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
 
-    var filename string
     client := authorize(r.Header.Get("Authorization"))
-    lang := strings.Replace(r.URL.Path, "/api/language/", "", 1)
+    l := strings.TrimPrefix(r.URL.Path, "/api/language/")
 
-    initial := strings.ToLower(lang[0:1])
+    initial := strings.ToLower(l[0:1])
 
-    if !regexp.MustCompile(`^[A-Za-z]$`).MatchString(initial) {
+    if !regexp.MustCompile(`^[a-z]$`).MatchString(initial) {
         initial = "#"
     }
 
@@ -110,48 +102,50 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
+        // A directory should always be found, letter or '#'.
+        w.WriteHeader(http.StatusInternalServerError)
         return
     }
 
-    for _, rc := range dir {
-        if isLanguage(rc, lang) {
-            filename = rc.GetName()
-            break
-        }
-    }
+    rc := findLanguage(dir, l)
 
-    if filename == "" {
+    if rc == nil {
         w.WriteHeader(http.StatusNotFound)
-        json.NewEncoder(w).Encode(struct { Message string } {
-            Message: "Repository not found.",
-        })
         return
     }
 
-    e := filepath.Ext(filename)
-    n := strings.TrimSuffix(filename, e)
+    name := rc.GetName()
+    ext := filepath.Ext(name)
+    n := strings.TrimSuffix(name, ext)
+
     language := &Language{
         Name: n,
-        Extension: e,
+        Extension: ext,
     }
 
     file, _, _, err := client.Repositories.GetContents(
         ctx,
         viper.GetString("repository.user"),
         viper.GetString("repository.name"),
-        fmt.Sprintf("%s/%s", initial, filename),
+        initial + "/" + name,
         nil,
     )
 
     if err != nil {
-        fmt.Printf("Error: %v\n", err)
+        // If the filename exists, then the file itself should be available.
+        w.WriteHeader(http.StatusInternalServerError)
         return
     }
 
-    c, err := file.GetContent()
+    s, err := file.GetContent()
+
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        return
+    }
+
     code := &Code{
-        Contents: c,
+        Contents: s,
     }
 
     res := &LanguageResponse{
@@ -160,7 +154,6 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
         RequestedAt: time.Now(),
     }
 
-    w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(res)
 }
 
@@ -172,24 +165,22 @@ func main() {
     viper.SetConfigName("env")
     viper.AddConfigPath("config")
     if err := viper.ReadInConfig(); err != nil {
-    	if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-    		// Config file not found
-	        fmt.Printf("Error: %v\n", err)
-    	} else {
-    		// Config file was found but another error was produced
+        if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+            fmt.Printf("Config file not found: %v\n", err)
+        } else {
             fmt.Printf("Error: %v\n", err)
-    	}
+        }
         return
     }
 
-    router.HandleFunc("/api", home).Methods("GET")
-    router.HandleFunc("/api/languages", getLanguages).Methods("GET")
-    router.HandleFunc("/api/language/{language}", getLanguage).Methods("GET")
+    router.HandleFunc("/api", home).Methods(http.MethodGet)
+    router.HandleFunc("/api/languages", getLanguages).Methods(http.MethodGet)
+    router.HandleFunc("/api/language/{language}", getLanguage).Methods(http.MethodGet)
 
-	log.Fatal(http.ListenAndServe(
-        fmt.Sprintf(":%d", viper.GetInt("server.port")),
+    http.ListenAndServe(
+        ":" + viper.GetString("server.port"),
         router,
-    ))
+    )
 }
 
 // --- HELPERS ---
@@ -208,18 +199,36 @@ func authorize(s string) *github.Client {
     return github.NewClient(tc)
 }
 
-func findFile(rcs []*github.RepositoryContent, l string) *github.RepositoryContent {
+func findLanguage(rcs []*github.RepositoryContent, l string) *github.RepositoryContent {
     for _, rc := range rcs {
         if isLanguage(rc, l) {
             return rc
         }
     }
+
     return nil
 }
 
-func isLanguage(rc *github.RepositoryContent, lang string) bool {
-    name := strings.ToLower(rc.GetName())
-    ext := filepath.Ext(name)
+func findLanguages(s string) (languages []*Language) {
+    re := regexp.MustCompile("\\* \\[(.+)\\]\\(.+\\)\n")
 
-    return strings.ToLower(lang) == strings.TrimSuffix(name, ext)
+    // Find list of languages: "* [Language Name](lang.ext)"
+    for _, m := range re.FindAllStringSubmatch(s, -1) {
+        ext := filepath.Ext(m[0])
+
+        languages = append(languages, &Language{
+            Name: m[1],
+            Extension: ext,
+        })
+    }
+
+    return
+}
+
+func isLanguage(rc *github.RepositoryContent, l string) bool {
+    name := rc.GetName()
+    ext := filepath.Ext(name)
+    n := strings.TrimSuffix(name, ext)
+
+    return strings.ToLower(l) == strings.ToLower(n)
 }
