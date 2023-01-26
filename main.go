@@ -17,9 +17,19 @@ import (
     "github.com/google/go-github/v49/github"
 )
 
+type Code struct {
+    Contents        string      `"json:contents"`
+}
+
 type Language struct {
     Name            string      `"json:name"`
     Extension       string      `"json:extension"`
+}
+
+type LanguageResponse struct {
+    Code            *Code       `"json:code"`
+    Language        *Language   `"json:language"`
+    RequestedAt     time.Time   `"json:requested_at"`
 }
 
 type LanguagesResponse struct {
@@ -37,8 +47,9 @@ func home(w http.ResponseWriter, r *http.Request) {
 }
 
 func getLanguages(w http.ResponseWriter, r *http.Request) {
-    var languages   []*Language
+    w.Header().Set("Content-Type", "application/json")
 
+    var languages   []*Language
     client := authorize(r.Header.Get("Authorization"))
 
     // Get the README object.
@@ -74,6 +85,81 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
         RequestedAt: time.Now(),
     }
 
+    json.NewEncoder(w).Encode(res)
+}
+
+func getLanguage(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+
+    var filename string
+    client := authorize(r.Header.Get("Authorization"))
+    lang := strings.Replace(r.URL.Path, "/api/language/", "", 1)
+
+    initial := strings.ToLower(lang[0:1])
+
+    if !regexp.MustCompile(`^[A-Za-z]$`).MatchString(initial) {
+        initial = "#"
+    }
+
+    _, dir, _, err := client.Repositories.GetContents(
+        ctx,
+        viper.GetString("repository.user"),
+        viper.GetString("repository.name"),
+        initial,
+        nil,
+    )
+
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+
+    for _, rc := range dir {
+        if isLanguage(rc, lang) {
+            filename = rc.GetName()
+            break
+        }
+    }
+
+    if filename == "" {
+        w.WriteHeader(http.StatusNotFound)
+        json.NewEncoder(w).Encode(struct { Message string } {
+            Message: "Repository not found.",
+        })
+        return
+    }
+
+    e := filepath.Ext(filename)
+    n := strings.TrimSuffix(filename, e)
+    language := &Language{
+        Name: n,
+        Extension: e,
+    }
+
+    file, _, _, err := client.Repositories.GetContents(
+        ctx,
+        viper.GetString("repository.user"),
+        viper.GetString("repository.name"),
+        fmt.Sprintf("%s/%s", initial, filename),
+        nil,
+    )
+
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+
+    c, err := file.GetContent()
+    code := &Code{
+        Contents: c,
+    }
+
+    res := &LanguageResponse{
+        Code: code,
+        Language: language,
+        RequestedAt: time.Now(),
+    }
+
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(res)
 }
@@ -98,7 +184,7 @@ func main() {
 
     router.HandleFunc("/api", home).Methods("GET")
     router.HandleFunc("/api/languages", getLanguages).Methods("GET")
-    // router.HandleFunc("/api/languages/{language}", getLanguage).Methods("GET")
+    router.HandleFunc("/api/language/{language}", getLanguage).Methods("GET")
 
 	log.Fatal(http.ListenAndServe(
         fmt.Sprintf(":%d", viper.GetInt("server.port")),
@@ -120,4 +206,20 @@ func authorize(s string) *github.Client {
     tc := oauth2.NewClient(ctx, ts)
 
     return github.NewClient(tc)
+}
+
+func findFile(rcs []*github.RepositoryContent, l string) *github.RepositoryContent {
+    for _, rc := range rcs {
+        if isLanguage(rc, l) {
+            return rc
+        }
+    }
+    return nil
+}
+
+func isLanguage(rc *github.RepositoryContent, lang string) bool {
+    name := strings.ToLower(rc.GetName())
+    ext := filepath.Ext(name)
+
+    return strings.ToLower(lang) == strings.TrimSuffix(name, ext)
 }
