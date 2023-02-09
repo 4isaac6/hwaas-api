@@ -6,6 +6,7 @@ import (
     "regexp"
     "context"
     "strings"
+    "net/url"
     "net/http"
     "path/filepath"
     "encoding/json"
@@ -222,14 +223,22 @@ func findLanguage(rcs []*github.RepositoryContent, l string) (*Language, error) 
 }
 
 func findLanguages(s string) (languages []*Language) {
-    re := regexp.MustCompile("\\* \\[(.+)\\]\\(.+\\)\n")
+    // Find language name and extension in link.
+    re := regexp.MustCompile("\\* \\[.+\\]\\((?:[a-z]|%23)/(.+)\\)\n")
 
     // Find list of languages: "* [Language Name](lang.ext)"
     for _, m := range re.FindAllStringSubmatch(s, -1) {
-        ext := strings.TrimSuffix(filepath.Ext(m[0]), ")\n")
+        filename, err := url.PathUnescape(m[1])
+
+        if err != nil {
+            continue
+        }
+
+        ext := filepath.Ext(filename)
+        name := strings.TrimSuffix(filename, ext)
 
         languages = append(languages, &Language{
-            Name: m[1],
+            Name: name,
             Extension: ext,
         })
     }
