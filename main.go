@@ -55,7 +55,7 @@ var ctx context.Context
 func home(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(struct { Message string } {
-        Message: "Welcome to the Hello World API",
+        Message: "Welcome to the Hello World API!",
     })
 }
 
@@ -73,7 +73,11 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        if err, ok := err.(*github.ErrorResponse); ok {
+            w.WriteHeader(err.Response.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
@@ -82,7 +86,11 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
     s, err := readme.GetContent()
 
     if err != nil {
-        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        if err, ok := err.(*github.ErrorResponse); ok {
+            w.WriteHeader(err.Response.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
@@ -118,7 +126,11 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        if err, ok := err.(*github.ErrorResponse); ok {
+            w.WriteHeader(err.Response.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
@@ -126,8 +138,12 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     language, err := findLanguage(dir, l)
 
     if err != nil {
-        err.(*ErrorResponse).Request = r
-        w.WriteHeader(err.(*ErrorResponse).StatusCode)
+        if err, ok := err.(*ErrorResponse); ok {
+            err.Request = r
+            w.WriteHeader(err.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
@@ -141,7 +157,11 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     )
 
     if err != nil {
-        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        if err, ok := err.(*github.ErrorResponse); ok {
+            w.WriteHeader(err.Response.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
@@ -149,7 +169,11 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
     s, err := file.GetContent()
 
     if err != nil {
-        w.WriteHeader(err.(*github.ErrorResponse).Response.StatusCode)
+        if err, ok := err.(*github.ErrorResponse); ok {
+            w.WriteHeader(err.Response.StatusCode)
+        } else {
+            w.WriteHeader(http.StatusInternalServerError)
+        }
         json.NewEncoder(w).Encode(err.Error())
         return
     }
