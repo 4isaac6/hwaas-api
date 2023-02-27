@@ -3,6 +3,7 @@ module hwaas-api/api
 go 1.19
 
 require (
+	github.com/allegro/bigcache/v3 v3.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/go-github/v49 v49.1.0 // indirect

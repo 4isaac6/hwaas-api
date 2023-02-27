@@ -3,17 +3,20 @@ package main
 import (
     "fmt"
     "time"
+    "bytes"
     "regexp"
     "context"
     "strings"
     "net/url"
     "net/http"
-    "path/filepath"
+    "encoding/gob"
     "encoding/json"
+    "path/filepath"
 
     "golang.org/x/oauth2"
     "github.com/spf13/viper"
     "github.com/gorilla/mux"
+	"github.com/allegro/bigcache/v3"
     "github.com/google/go-github/v49/github"
 )
 
@@ -29,11 +32,13 @@ type Language struct {
 type LanguageResponse struct {
     Code            *Code       `"json:code"`
     Language        *Language   `"json:language"`
+    CachedAt        time.Time   `"json:cached_at"`
     RequestedAt     time.Time   `"json:requested_at"`
 }
 
 type LanguagesResponse struct {
     Languages       []*Language `"json:languages"`
+    CachedAt        time.Time   `"json:cached_at"`
     RequestedAt     time.Time   `"json:requested_at"`
 }
 
@@ -51,6 +56,7 @@ func (r *ErrorResponse) Error() string {
 }
 
 var ctx context.Context
+var cache *bigcache.BigCache
 
 func home(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
@@ -60,7 +66,15 @@ func home(w http.ResponseWriter, r *http.Request) {
 }
 
 func getLanguages(w http.ResponseWriter, r *http.Request) {
+    var res LanguagesResponse
+
     w.Header().Set("Content-Type", "application/json")
+
+    if err := cacheGet("languages", &res); err == nil {
+        res.RequestedAt = time.Now()
+        json.NewEncoder(w).Encode(res)
+        return
+    }
 
     client := authorize(r.Header.Get("Authorization"))
 
@@ -97,21 +111,32 @@ func getLanguages(w http.ResponseWriter, r *http.Request) {
 
     languages := findLanguages(s)
 
-    res := &LanguagesResponse{
+    res = LanguagesResponse{
         Languages: languages,
+        CachedAt: time.Now(),
         RequestedAt: time.Now(),
     }
+
+    cacheSet("languages", res)
 
     json.NewEncoder(w).Encode(res)
 }
 
 func getLanguage(w http.ResponseWriter, r *http.Request) {
+    var res LanguageResponse
+
     w.Header().Set("Content-Type", "application/json")
 
-    client := authorize(r.Header.Get("Authorization"))
     l := strings.TrimPrefix(r.URL.Path, "/api/language/")
 
+    if err := cacheGet("language-" + l, &res); err == nil {
+        res.RequestedAt = time.Now()
+        json.NewEncoder(w).Encode(res)
+        return
+    }
+
     initial := strings.ToLower(l[0:1])
+    client := authorize(r.Header.Get("Authorization"))
 
     if !regexp.MustCompile("^[a-z]$").MatchString(initial) {
         initial = "#"
@@ -182,11 +207,14 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
         Contents: s,
     }
 
-    res := &LanguageResponse{
+    res = LanguageResponse{
         Code: code,
         Language: language,
+        CachedAt: time.Now(),
         RequestedAt: time.Now(),
     }
+
+    cacheSet("language-" + l, res)
 
     json.NewEncoder(w).Encode(res)
 }
@@ -194,6 +222,7 @@ func getLanguage(w http.ResponseWriter, r *http.Request) {
 func main() {
     router := mux.NewRouter()
     ctx = context.Background()
+    cache, _ = bigcache.New(ctx, bigcache.DefaultConfig(24 * time.Hour))
 
     loadConfigs([]string {
         "env",
@@ -223,6 +252,38 @@ func authorize(s string) *github.Client {
     tc := oauth2.NewClient(ctx, ts)
 
     return github.NewClient(tc)
+}
+
+func cacheGet(key string, res interface{}) error {
+    entry, err := cache.Get(key)
+
+    if err != nil {
+        return err
+    }
+
+    buffer := bytes.NewBuffer(entry)
+    dec := gob.NewDecoder(buffer)
+    err = dec.Decode(res)
+
+    if err != nil {
+        // If the cache entry throws an error when decoding, delete it and fetch it again.
+        cache.Delete(key)
+        return err
+    }
+
+    return nil
+}
+
+func cacheSet(key string, value interface{}) error {
+    buffer := bytes.NewBuffer([]byte{})
+    enc := gob.NewEncoder(buffer)
+    err := enc.Encode(value)
+
+    if err != nil {
+        return err
+    }
+
+    return cache.Set(key, buffer.Bytes())
 }
 
 func findLanguage(rcs []*github.RepositoryContent, l string) (*Language, error) {
